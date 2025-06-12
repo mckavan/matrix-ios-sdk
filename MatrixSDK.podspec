@@ -1,7 +1,7 @@
 Pod::Spec.new do |s|
 
   s.name         = "MatrixSDK"
-  s.version      = "0.26.10"
+  s.version      = "0.27.17"
   s.summary      = "The iOS SDK to build apps compatible with Matrix (https://www.matrix.org)"
 
   s.description  = <<-DESC
@@ -42,10 +42,9 @@ Pod::Spec.new do |s|
       ss.dependency 'SwiftyBeaver', '1.9.5'
 
       # Requirements for e2e encryption
-      ss.dependency 'OLMKit', '~> 3.2.5'
       ss.dependency 'Realm', '10.27.0'
       ss.dependency 'libbase58', '~> 0.1.4'
-      ss.dependency 'MatrixSDKCrypto', '0.3.4', :configurations => ["DEBUG", "RELEASE"], :inhibit_warnings => true
+      ss.dependency 'MatrixSDKCrypto', '0.11.1', :configurations => ["DEBUG", "RELEASE"], :inhibit_warnings => true
   end
 
   s.subspec 'JingleCallStack' do |ss|
@@ -62,7 +61,7 @@ Pod::Spec.new do |s|
     
     # Use WebRTC framework included in Jitsi Meet SDK
     # Use the lite version so we don't add a dependency on Giphy.
-    ss.ios.dependency 'JitsiMeetSDKLite', '7.0.1-lite'
+    ss.ios.dependency 'JitsiMeetSDKLite', '8.1.2-lite'
   end
 
 end

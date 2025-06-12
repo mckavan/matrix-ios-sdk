@@ -101,8 +101,9 @@ class MXCrossSigningV2UnitTests: XCTestCase {
                 userId: "Alice",
                 trustsOurOwnDevice: true,
                 masterKey: "",
+                userSigningKey: "",
                 selfSigningKey: "",
-                userSigningKey: ""
+                hasVerificationViolation: false
             )
         ]
         crossSigning.refreshState { _ in
@@ -120,8 +121,9 @@ class MXCrossSigningV2UnitTests: XCTestCase {
                 userId: "Alice",
                 trustsOurOwnDevice: true,
                 masterKey: "",
+                userSigningKey: "",
                 selfSigningKey: "",
-                userSigningKey: ""
+                hasVerificationViolation: false
             )
         ]
         crossSigning.refreshState { _ in
@@ -149,8 +151,9 @@ class MXCrossSigningV2UnitTests: XCTestCase {
                     userId: "Alice",
                     trustsOurOwnDevice: true,
                     masterKey: "",
+                    userSigningKey: "",
                     selfSigningKey: "",
-                    userSigningKey: ""
+                    hasVerificationViolation: false
                 )
             ]
             

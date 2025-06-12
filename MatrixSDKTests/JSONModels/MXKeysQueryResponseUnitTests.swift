@@ -33,7 +33,8 @@ class MXKeysQueryResponseUnitTests: XCTestCase {
                         userId: userId,
                         usage: ["self_signing"],
                         keys: "\(userId)-SSK"
-                    ).jsonString()
+                    ).jsonString(),
+                    hasVerificationViolation: false
                 ),
                 isVerified: true
             )
@@ -51,16 +52,17 @@ class MXKeysQueryResponseUnitTests: XCTestCase {
                         usage: ["master"],
                         keys: "\(userId)-MSK"
                     ).jsonString(),
+                    userSigningKey: MXCrossSigningKey(
+                        userId: userId,
+                        usage: ["user_signing"],
+                        keys: "\(userId)-USK"
+                    ).jsonString(),
                     selfSigningKey: MXCrossSigningKey(
                         userId: userId,
                         usage: ["self_signing"],
                         keys: "\(userId)-SSK"
                     ).jsonString(),
-                    userSigningKey: MXCrossSigningKey(
-                        userId: userId,
-                        usage: ["user_signing"],
-                        keys: "\(userId)-USK"
-                    ).jsonString()
+                    hasVerificationViolation: false
                 ),
                 isVerified: true
             )

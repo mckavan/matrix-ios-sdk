@@ -231,7 +231,7 @@ typedef void (^MXOnResumeDone)(void);
     {
         matrixRestClient = mxRestClient;
         _threePidAddManager = [[MX3PidAddManager alloc] initWithMatrixSession:self];
-        mediaManager = [[MXMediaManager alloc] initWithHomeServer:matrixRestClient.homeserver];
+        mediaManager = [[MXMediaManager alloc] initWithRestClient:matrixRestClient];
         rooms = [NSMutableDictionary dictionary];
         roomSummaries = [NSMutableDictionary dictionary];
         _roomSummaryUpdateDelegate = [MXRoomSummaryUpdater roomSummaryUpdaterForSession:self];
@@ -1150,9 +1150,18 @@ typedef void (^MXOnResumeDone)(void);
 
 - (void)resume:(void (^)(void))resumeDone
 {
-    [self handleBackgroundSyncCacheIfRequiredWithCompletion:^{
-        [self _resume:resumeDone];
-    }];
+    // The app has resumed there might have been a NSE run that have invalidated the cache
+    if (self.crypto) {
+        [self.crypto invalidateCache:^{
+            [self handleBackgroundSyncCacheIfRequiredWithCompletion:^{
+                [self _resume:resumeDone];
+            }];
+        }];
+    } else {
+        [self handleBackgroundSyncCacheIfRequiredWithCompletion:^{
+            [self _resume:resumeDone];
+        }];
+    }
 }
 
 - (void)_resume:(void (^)(void))resumeDone

@@ -71,13 +71,13 @@ class MXSASTransactionV2UnitTests: XCTestCase {
     
     // MARK: - Test State
     
-    func test_startedState() {
+    func test_startedAndCreatedState() {
         let incoming = makeTransaction(isIncoming: true)
         incoming.onChange(state: .started)
         XCTAssertEqual(incoming.state, MXSASTransactionStateIncomingShowAccept)
         
         let outgoing = makeTransaction(isIncoming: false)
-        outgoing.onChange(state: .started)
+        outgoing.onChange(state: .created)
         XCTAssertEqual(outgoing.state, MXSASTransactionStateOutgoingWaitForPartnerToAccept)
     }
     
@@ -117,7 +117,7 @@ class MXSASTransactionV2UnitTests: XCTestCase {
     func test_cancelledByMeState() {
         let transaction = makeTransaction()
         
-        transaction.onChange(state: .cancelled(cancelInfo: .init(cancelCode: "123", reason: "Changed mind", cancelledByUs: true)))
+        transaction.onChange(state: .cancelled(cancelInfo: .init(reason: "Changed mind", cancelCode: "123", cancelledByUs: true)))
         
         XCTAssertEqual(transaction.reasonCancelCode?.value, "123")
         XCTAssertEqual(transaction.reasonCancelCode?.humanReadable, "Changed mind")
@@ -127,7 +127,7 @@ class MXSASTransactionV2UnitTests: XCTestCase {
     func test_cancelledByThemState() {
         let transaction = makeTransaction()
         
-        transaction.onChange(state: .cancelled(cancelInfo: .init(cancelCode: "123", reason: "Changed mind", cancelledByUs: false)))
+        transaction.onChange(state: .cancelled(cancelInfo: .init(reason: "Changed mind", cancelCode: "123", cancelledByUs: false)))
         
         XCTAssertEqual(transaction.reasonCancelCode?.value, "123")
         XCTAssertEqual(transaction.reasonCancelCode?.humanReadable, "Changed mind")

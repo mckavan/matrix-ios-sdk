@@ -41,6 +41,10 @@ class DevicesSourceStub: CryptoIdentityStub, MXCryptoDevicesSource {
     func devices(userId: String) -> [Device] {
         return devices[userId]?.map { $0.value } ?? []
     }
+    
+    func dehydratedDevices() -> DehydratedDevicesProtocol {
+        fatalError()
+    }
 }
 
 class UserIdentitySourceStub: CryptoIdentityStub, MXCryptoUserIdentitySource {
@@ -138,7 +142,9 @@ class CryptoCrossSigningStub: CryptoIdentityStub, MXCryptoCrossSigning {
             isBlocked: device.isBlocked,
             locallyTrusted: device.locallyTrusted,
             // Modify cross signing trusted
-            crossSigningTrusted: true
+            crossSigningTrusted: true,
+            firstTimeSeenTs: 0,
+            dehydrated: false
         )
     }
     
@@ -153,6 +159,14 @@ class CryptoCrossSigningStub: CryptoIdentityStub, MXCryptoCrossSigning {
     
     func devices(userId: String) -> [Device] {
         return devices[userId]?.map { $0.value } ?? []
+    }
+    
+    func dehydratedDevices() -> DehydratedDevicesProtocol {
+        fatalError()
+    }
+    
+    func queryMissingSecretsFromOtherSessions() async throws {
+        
     }
 }
 

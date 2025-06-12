@@ -1247,6 +1247,101 @@ NSString *const kMXPushRuleScopeStringGlobal = @"global";
 
 @end
 
+@interface MXKeysQueryResponseRaw ()
+@end
+
+@implementation MXKeysQueryResponseRaw
+
++ (id)modelFromJSON:(NSDictionary *)JSONDictionary
+{
+    MXKeysQueryResponseRaw *keysQueryResponse = [[MXKeysQueryResponseRaw alloc] init];
+    if (keysQueryResponse)
+    {
+
+        if ([JSONDictionary[@"device_keys"] isKindOfClass:NSDictionary.class])
+        {
+            keysQueryResponse.deviceKeys = JSONDictionary[@"device_keys"];
+        }
+
+        MXJSONModelSetDictionary(keysQueryResponse.failures, JSONDictionary[@"failures"]);
+
+        // Extract cross-signing keys
+        NSMutableDictionary *crossSigningKeys = [NSMutableDictionary dictionary];
+
+        // Gather all of them by type by user
+        NSDictionary<NSString*, NSDictionary<NSString*, MXCrossSigningKey*>*> *allKeys =
+        @{
+          MXCrossSigningKeyType.master: [self extractUserKeysFromJSON:JSONDictionary[@"master_keys"]] ?: @{},
+          MXCrossSigningKeyType.selfSigning: [self extractUserKeysFromJSON:JSONDictionary[@"self_signing_keys"]] ?: @{},
+          MXCrossSigningKeyType.userSigning: [self extractUserKeysFromJSON:JSONDictionary[@"user_signing_keys"]] ?: @{},
+          };
+
+        // Package them into a `userId -> MXCrossSigningInfo` dictionary
+        for (NSString *keyType in allKeys)
+        {
+            NSDictionary<NSString*, MXCrossSigningKey*> *keys = allKeys[keyType];
+            for (NSString *userId in keys)
+            {
+                MXCrossSigningInfo *crossSigningInfo = crossSigningKeys[userId];
+                if (!crossSigningInfo)
+                {
+                    crossSigningInfo = [[MXCrossSigningInfo alloc] initWithUserId:userId];
+                    crossSigningKeys[userId] = crossSigningInfo;
+                }
+
+                [crossSigningInfo addCrossSigningKey:keys[userId] type:keyType];
+            }
+        }
+
+        keysQueryResponse.crossSigningKeys = crossSigningKeys;
+    }
+
+    return keysQueryResponse;
+}
+
++ (NSDictionary<NSString*, MXCrossSigningKey*>*)extractUserKeysFromJSON:(NSDictionary *)keysJSONDictionary
+{
+    NSMutableDictionary<NSString*, MXCrossSigningKey*> *keys = [NSMutableDictionary dictionary];
+    for (NSString *userId in keysJSONDictionary)
+    {
+        MXCrossSigningKey *key;
+        MXJSONModelSetMXJSONModel(key, MXCrossSigningKey, keysJSONDictionary[userId]);
+        if (key)
+        {
+            keys[userId] = key;
+        }
+    }
+
+    if (!keys.count)
+    {
+        keys = nil;
+    }
+
+    return keys;
+}
+
+- (NSDictionary *)JSONDictionary
+{
+    
+    NSMutableDictionary *master = [[NSMutableDictionary alloc] init];
+    NSMutableDictionary *selfSigning = [[NSMutableDictionary alloc] init];
+    NSMutableDictionary *userSigning = [[NSMutableDictionary alloc] init];
+    for (NSString *userId in self.crossSigningKeys) {
+        master[userId] = self.crossSigningKeys[userId].masterKeys.JSONDictionary.copy;
+        selfSigning[userId] = self.crossSigningKeys[userId].selfSignedKeys.JSONDictionary.copy;
+        userSigning[userId] = self.crossSigningKeys[userId].userSignedKeys.JSONDictionary.copy;
+    }
+    
+    return @{
+        @"device_keys": self.deviceKeys.copy ?: @{},
+        @"failures": self.failures.copy ?: @{},
+        @"master_keys": master.copy ?: @{},
+        @"self_signing_keys": selfSigning.copy ?: @{},
+        @"user_signing_keys": userSigning.copy ?: @{}
+    };
+}
+
+@end
 @interface MXKeysClaimResponse ()
 
 /**
@@ -2165,62 +2260,37 @@ NSString *const kMXPushRuleScopeStringGlobal = @"global";
 
 @end
 
-#pragma mark - Dehydration
+#pragma mark - Device Dehydration
 
-@implementation MXDehydratedDevice
-
-+ (id)modelFromJSON:(NSDictionary *)JSONDictionary
-{
-    MXDehydratedDevice *device = [[MXDehydratedDevice alloc] init];
-    if (device)
-    {
-        MXJSONModelSetString(device.deviceId, JSONDictionary[@"device_id"]);
-        NSDictionary *deviceData = nil;
-        MXJSONModelSetDictionary(deviceData, JSONDictionary[@"device_data"]);
-        MXJSONModelSetString(device.account, deviceData[@"account"]);
-        MXJSONModelSetString(device.algorithm, deviceData[@"algorithm"]);
-        MXJSONModelSetString(device.passphrase, deviceData[@"passphrase"]);
-    }
-    
-    return device;
-}
-
-- (instancetype)initWithCoder:(NSCoder *)aDecoder
-{
-    self = [super init];
-    if (self)
-    {
-        _deviceId = [aDecoder decodeObjectForKey:@"device_id"];
-        _account = [aDecoder decodeObjectForKey:@"account"];
-        _algorithm = [aDecoder decodeObjectForKey:@"algorithm"];
-        _passphrase = [aDecoder decodeObjectForKey:@"passphrase"];
-    }
-    return self;
-}
-
-- (void)encodeWithCoder:(NSCoder *)aCoder
-{
-    [aCoder encodeObject:_deviceId forKey:@"device_id"];
-    [aCoder encodeObject:_account forKey:@"account"];
-    [aCoder encodeObject:_algorithm forKey:@"algorithm"];
-    if (_passphrase)
-    {
-        [aCoder encodeObject:_passphrase forKey:@"passphrase"];
-    }
-}
+@implementation MXDehydratedDeviceCreationParameters : MXJSONModel
 
 - (NSDictionary *)JSONDictionary
 {
-    NSMutableDictionary *dictionary = [[NSMutableDictionary alloc] initWithDictionary:@{
-        @"algorithm": self.algorithm,
-        @"account": self.account
-    }];
-    
-    if (self.passphrase)
-    {
-        dictionary[@"passphrase"] = self.passphrase;
-    }
-    return dictionary.copy;
+    return [MXTools deserialiseJSONString:self.body];
+}
+
+@end
+
+@implementation MXDehydratedDeviceResponse
+
++ (instancetype)modelFromJSON:(NSDictionary *)JSONDictionary
+{
+    MXDehydratedDeviceResponse *dehydratedDevice = [[MXDehydratedDeviceResponse alloc] init];
+    MXJSONModelSetString(dehydratedDevice.deviceId, JSONDictionary[@"device_id"]);
+    MXJSONModelSetDictionary(dehydratedDevice.deviceData, JSONDictionary[@"device_data"]);
+    return dehydratedDevice;
+}
+
+@end
+
+@implementation MXDehydratedDeviceEventsResponse
+
++ (instancetype)modelFromJSON:(NSDictionary *)JSONDictionary
+{
+    MXDehydratedDeviceEventsResponse *dehydratedDevice = [[MXDehydratedDeviceEventsResponse alloc] init];
+    MXJSONModelSetArray(dehydratedDevice.events, JSONDictionary[@"events"]);
+    MXJSONModelSetString(dehydratedDevice.nextBatch, JSONDictionary[@"next_batch"]);
+    return dehydratedDevice;
 }
 
 @end

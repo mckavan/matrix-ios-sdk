@@ -22,7 +22,9 @@
  Matrix content respository path
  */
 NSString *const kMXContentUriScheme  = @"mxc://";
+
 NSString *const kMXContentPrefixPath = @"_matrix/media/v3";
+NSString *const kMXAuthenticatedContentPrefixPath = @"_matrix/client/v1/media";
 
 /**
  Prefix used in path of antivirus server API requests.

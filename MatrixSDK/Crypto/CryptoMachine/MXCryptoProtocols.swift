@@ -35,7 +35,8 @@ protocol MXCryptoSyncing: MXCryptoIdentity {
         toDevice: MXToDeviceSyncResponse?,
         deviceLists: MXDeviceListResponse?,
         deviceOneTimeKeysCounts: [String: NSNumber],
-        unusedFallbackKeys: [String]?
+        unusedFallbackKeys: [String]?,
+        nextBatchToken: String
     ) throws -> MXToDeviceSyncResponse
     
     func processOutgoingRequests() async throws
@@ -50,6 +51,7 @@ protocol MXCryptoSyncing: MXCryptoIdentity {
 protocol MXCryptoDevicesSource: MXCryptoIdentity {
     func device(userId: String, deviceId: String) -> Device?
     func devices(userId: String) -> [Device]
+    func dehydratedDevices() -> DehydratedDevicesProtocol
 }
 
 /// Source of user identities and their cryptographic trust status
@@ -87,7 +89,9 @@ protocol MXCryptoCrossSigning: MXCryptoUserIdentitySource, MXCryptoDevicesSource
     func crossSigningStatus() -> CrossSigningStatus
     func bootstrapCrossSigning(authParams: [AnyHashable: Any]) async throws
     func exportCrossSigningKeys() -> CrossSigningKeyExport?
-    func importCrossSigningKeys(export: CrossSigningKeyExport)
+    func importCrossSigningKeys(export: CrossSigningKeyExport) throws
+    
+    func queryMissingSecretsFromOtherSessions() async throws
 }
 
 /// Verification functionality

@@ -187,7 +187,8 @@ extension MXCryptoMachine: MXCryptoSyncing {
         toDevice: MXToDeviceSyncResponse?,
         deviceLists: MXDeviceListResponse?,
         deviceOneTimeKeysCounts: [String: NSNumber],
-        unusedFallbackKeys: [String]?
+        unusedFallbackKeys: [String]?,
+        nextBatchToken: String
     ) throws -> MXToDeviceSyncResponse {
         let events = toDevice?.jsonString() ?? "[]"
         let deviceChanges = DeviceLists(
@@ -200,20 +201,30 @@ extension MXCryptoMachine: MXCryptoSyncing {
             events: events,
             deviceChanges: deviceChanges,
             keyCounts: keyCounts,
-            unusedFallbackKeys: unusedFallbackKeys
+            unusedFallbackKeys: unusedFallbackKeys,
+            nextBatchToken: nextBatchToken
         )
         
-        guard
-            let json = MXTools.deserialiseJSONString(result) as? [Any],
-            let toDevice = MXToDeviceSyncResponse(fromJSON: ["events": json])
-        else {
+        var deserialisedToDeviceEvents = [Any]()
+        for toDeviceEvent in result.toDeviceEvents {
+            guard let deserialisedToDeviceEvent = MXTools.deserialiseJSONString(toDeviceEvent) else {
+                log.failure("Failed deserialising to device event", context: [
+                    "result": result
+                ])
+                return MXToDeviceSyncResponse()
+            }
+            
+            deserialisedToDeviceEvents.append(deserialisedToDeviceEvent)
+        }
+        
+        guard let toDeviceSyncResponse = MXToDeviceSyncResponse(fromJSON: ["events": deserialisedToDeviceEvents]) else {
             log.failure("Result cannot be serialized", context: [
                 "result": result
             ])
             return MXToDeviceSyncResponse()
         }
         
-        return toDevice
+        return toDeviceSyncResponse
     }
     
     func downloadKeysIfNecessary(users: [String]) async throws {
@@ -308,7 +319,7 @@ extension MXCryptoMachine: MXCryptoSyncing {
     }
     
     private func markRequestAsSent(requestId: String, requestType: RequestType, response: String? = nil) throws {
-        try self.machine.markRequestAsSent(requestId: requestId, requestType: requestType, response: response ?? "")
+        try self.machine.markRequestAsSent(requestId: requestId, requestType: requestType, responseBody: response ?? "")
     }
     
     private func handleOutgoingRequests() async throws {
@@ -357,6 +368,10 @@ extension MXCryptoMachine: MXCryptoDevicesSource {
             log.error("Cannot fetch device", context: error)
             return nil
         }
+    }
+    
+    func dehydratedDevices() -> DehydratedDevicesProtocol {
+        machine.dehydratedDevices()
     }
 }
 
@@ -547,7 +562,9 @@ extension MXCryptoMachine: MXCryptoRoomEventDecrypting {
             handleVerificationEvents: false,
             // The app does not use strict shields by default, in the future this will become configurable
             // per room.
-            strictShields: false
+            strictShields: false,
+            // Keep existing legacy behaviour
+            decryptionSettings: .init(senderDeviceTrustRequirement: .untrusted)
         )
     }
     
@@ -576,23 +593,51 @@ extension MXCryptoMachine: MXCryptoCrossSigning {
     
     func bootstrapCrossSigning(authParams: [AnyHashable: Any]) async throws {
         let result = try machine.bootstrapCrossSigning()
+        // If this is called before the device keys have been uploaded there will be a
+        // request to upload them, do that first.
+        if let optionalKeyRequest = result.uploadKeysRequest {
+            try await handleRequest(optionalKeyRequest)
+        }
         let _ = try await [
             requests.uploadSigningKeys(request: result.uploadSigningKeysRequest, authParams: authParams),
-            requests.uploadSignatures(request: result.signatureRequest)
+            requests.uploadSignatures(request: result.uploadSignatureRequest)
         ]
     }
     
     func exportCrossSigningKeys() -> CrossSigningKeyExport? {
-        machine.exportCrossSigningKeys()
+        do {
+            return try machine.exportCrossSigningKeys()
+        } catch {
+            log.error("Failed exporting cross signing keys", context: error)
+            return nil
+        }
     }
     
-    func importCrossSigningKeys(export: CrossSigningKeyExport) {
+    func importCrossSigningKeys(export: CrossSigningKeyExport) throws {
         do {
             try machine.importCrossSigningKeys(export: export)
         } catch {
             log.error("Failed importing cross signing keys", context: error)
+            throw error
         }
     }
+    
+    func queryMissingSecretsFromOtherSessions() async throws {
+        let isMissingSecrets = try machine.queryMissingSecretsFromOtherSessions()
+        
+        if (isMissingSecrets) {
+            // Out-of-sync check if there are any secret request to send out as a result of
+            // the missing secret request
+            for request in try machine.outgoingRequests() {
+                if case .toDevice(_, let eventType, _) = request {
+                    if (eventType == kMXEventTypeStringSecretRequest) {
+                        try await handleRequest(request)
+                    }
+                }
+            }
+        }
+    }
+    
 }
 
 extension MXCryptoMachine: MXCryptoVerifying {
@@ -784,7 +829,7 @@ extension MXCryptoMachine: MXCryptoBackup {
         }
         
         do {
-            let verification = try machine.verifyBackup(authData: string)
+            let verification = try machine.verifyBackup(backupInfo: string)
             return verification.trusted
         } catch {
             log.error("Failed verifying backup", context: error)
@@ -796,7 +841,7 @@ extension MXCryptoMachine: MXCryptoBackup {
         guard let message = MXCryptoTools.canonicalJSONString(forJSON: object) else {
             throw Error.cannotSerialize
         }
-        return machine.sign(message: message)
+        return try machine.sign(message: message)
     }
     
     func backupRoomKeys() async throws {

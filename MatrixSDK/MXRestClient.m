@@ -142,10 +142,11 @@ MXAuthAction;
      */
     dispatch_queue_t processingQueue;
 }
+@property(readwrite) BOOL isUsingAuthenticatedMedia;
 @end
 
 @implementation MXRestClient
-@synthesize credentials, apiPathPrefix, contentPathPrefix, completionQueue, antivirusServerPathPrefix;
+@synthesize credentials, apiPathPrefix, contentPathPrefix, authenticatedContentPathPrefix, completionQueue, antivirusServerPathPrefix, isUsingAuthenticatedMedia;
 
 + (dispatch_queue_t)refreshQueue
 {
@@ -198,6 +199,7 @@ andUnauthenticatedHandler: (MXRestClientUnauthenticatedHandler)unauthenticatedHa
         apiPathPrefix = kMXAPIPrefixPathV3;
         antivirusServerPathPrefix = kMXAntivirusAPIPrefixPathUnstable;
         contentPathPrefix = kMXContentPrefixPath;
+        authenticatedContentPathPrefix = kMXAuthenticatedContentPrefixPath;
         
         credentials = inCredentials;
         _identityServer = credentials.identityServer;
@@ -529,6 +531,7 @@ andUnauthenticatedHandler: (MXRestClientUnauthenticatedHandler)unauthenticatedHa
                                          [self dispatchProcessing:^{
                                              MXJSONModelSetMXJSONModel(matrixVersions, MXMatrixVersions, JSONResponse);
                                          } andCompletion:^{
+                                             self->isUsingAuthenticatedMedia = matrixVersions.supportsAuthenticatedMedia;
                                              success(matrixVersions);
                                          }];
                                      }
@@ -1816,43 +1819,43 @@ andUnauthenticatedHandler: (MXRestClientUnauthenticatedHandler)unauthenticatedHa
     {
         case MXPushRuleKindOverride:
             kindString = @"override";
-            if (conditions.count && actions.count)
+            if (conditions.count && actions)
             {
                 content = @{@"conditions": conditions, @"actions": actions};
             }
-            else if (actions.count)
+            else if (actions)
             {
                 content = @{@"actions": actions};
             }
             break;
         case MXPushRuleKindContent:
             kindString = @"content";
-            if (pattern.length && actions.count)
+            if (pattern.length && actions)
             {
                 content = @{@"pattern": pattern, @"actions": actions};
             }
             break;
         case MXPushRuleKindRoom:
             kindString = @"room";
-            if (actions.count)
+            if (actions)
             {
                 content = @{@"actions": actions};
             }
             break;
         case MXPushRuleKindSender:
             kindString = @"sender";
-            if (actions.count)
+            if (actions)
             {
                 content = @{@"actions": actions};
             }
             break;
         case MXPushRuleKindUnderride:
             kindString = @"underride";
-            if (conditions.count && actions.count)
+            if (conditions.count && actions)
             {
                 content = @{@"conditions": conditions, @"actions": actions};
             }
-            else if (actions.count)
+            else if (actions)
             {
                 content = @{@"actions": actions};
             }
@@ -3077,12 +3080,35 @@ andUnauthenticatedHandler: (MXRestClientUnauthenticatedHandler)unauthenticatedHa
     
     if (relations && [relations count] > 0)
     {
-        NSString* property = withRelationsIsStable ? @"with_relations" : @"org.matrix.msc3912.with_relations";
+        NSString* property = withRelationsIsStable ? @"with_rel_types" : @"org.matrix.msc3912.with_relations";
         parameters[property] = relations;
     }
 
     MXWeakify(self);
     return [httpClient requestWithMethod:@"PUT"
+                                    path:path
+                              parameters:parameters
+                                 success:^(NSDictionary *JSONResponse) {
+                                     MXStrongifyAndReturnIfNil(self);
+                                     [self dispatchSuccess:success];
+                                 }
+                                 failure:^(NSError *error) {
+                                     MXStrongifyAndReturnIfNil(self);
+        [self dispatchFailure:error inBlock:failure];
+    }];
+}
+
+-(MXHTTPOperation *)reportRoom:(NSString *)roomId
+                        reason:(NSString *)reason
+                       success:(void (^)(void))success
+                       failure:(void (^)(NSError *))failure
+{
+    NSString *path = [NSString stringWithFormat:@"%@/rooms/%@/report", kMXAPIPrefixPathV3, roomId];
+
+    NSDictionary *parameters = @{ @"reason": reason.length > 0 ? reason : @"" };
+
+    MXWeakify(self);
+    return [httpClient requestWithMethod:@"POST"
                                     path:path
                               parameters:parameters
                                  success:^(NSDictionary *JSONResponse) {
@@ -4475,28 +4501,30 @@ andUnauthenticatedHandler: (MXRestClientUnauthenticatedHandler)unauthenticatedHa
 {
     NSMutableDictionary *parameters = [NSMutableDictionary dictionary];
     parameters[@"url"] = [url absoluteString];
+    NSString* path = isUsingAuthenticatedMedia ? authenticatedContentPathPrefix : contentPathPrefix;
     
     MXWeakify(self);
+    
     return [httpClient requestWithMethod:@"GET"
-                                    path:[NSString stringWithFormat:@"%@/preview_url", contentPathPrefix]
+                                    path:[NSString stringWithFormat:@"%@/preview_url", path]
                               parameters:parameters
                                  success:^(NSDictionary *JSONResponse) {
-                                     MXStrongifyAndReturnIfNil(self);
-
-                                     if (success)
-                                     {
-                                         __block MXURLPreview *urlPreview;
-                                         [self dispatchProcessing:^{
-                                             MXJSONModelSetMXJSONModel(urlPreview, MXURLPreview, JSONResponse);
-                                         } andCompletion:^{
-                                             success(urlPreview);
-                                         }];
-                                     }
-                                 }
+        MXStrongifyAndReturnIfNil(self);
+        
+        if (success)
+        {
+            __block MXURLPreview *urlPreview;
+            [self dispatchProcessing:^{
+                MXJSONModelSetMXJSONModel(urlPreview, MXURLPreview, JSONResponse);
+            } andCompletion:^{
+                success(urlPreview);
+            }];
+        }
+    }
                                  failure:^(NSError *error) {
-                                     MXStrongifyAndReturnIfNil(self);
-                                     [self dispatchFailure:error inBlock:failure];
-                                 }];
+        MXStrongifyAndReturnIfNil(self);
+        [self dispatchFailure:error inBlock:failure];
+    }];
 }
 
 #pragma mark - Antivirus server API
@@ -4925,6 +4953,51 @@ andUnauthenticatedHandler: (MXRestClientUnauthenticatedHandler)unauthenticatedHa
                                  }];
 }
 
+- (MXHTTPOperation*)downloadKeysRawForUsers:(NSArray<NSString*>*)userIds
+                                   token:(NSString *)token
+                                 success:(void (^)(MXKeysQueryResponseRaw *keysQueryResponse))success
+                                 failure:(void (^)(NSError *error))failure
+{
+    NSString *path = [NSString stringWithFormat:@"%@/keys/query", kMXAPIPrefixPathR0];
+
+    NSMutableDictionary *downloadQuery = [NSMutableDictionary dictionary];
+    for (NSString *userID in userIds)
+    {
+        downloadQuery[userID] = @[];
+    }
+
+    NSMutableDictionary *parameters = [NSMutableDictionary dictionaryWithDictionary:@{
+                                                                                      @"device_keys": downloadQuery
+                                                                                      }];
+
+    if (token)
+    {
+        parameters[@"token"] = token;
+    }
+
+    MXWeakify(self);
+    return [httpClient requestWithMethod:@"POST"
+                                    path: path
+                              parameters:parameters
+                                 success:^(NSDictionary *JSONResponse) {
+                                     MXStrongifyAndReturnIfNil(self);
+
+                                     if (success)
+                                     {
+                                         __block MXKeysQueryResponseRaw *keysQueryResponse;
+                                         [self dispatchProcessing:^{
+                                             MXJSONModelSetMXJSONModel(keysQueryResponse, MXKeysQueryResponseRaw, JSONResponse);
+                                         } andCompletion:^{
+                                             success(keysQueryResponse);
+                                         }];
+                                     }
+                                 }
+                                 failure:^(NSError *error) {
+                                     MXStrongifyAndReturnIfNil(self);
+                                     [self dispatchFailure:error inBlock:failure];
+                                 }];
+}
+
 - (MXHTTPOperation *)claimOneTimeKeysForUsersDevices:(MXUsersDevicesMap<NSString *> *)usersDevicesKeyTypesMap success:(void (^)(MXKeysClaimResponse *))success failure:(void (^)(NSError *))failure
 {
     NSString *path = [NSString stringWithFormat:@"%@/keys/claim", kMXAPIPrefixPathV3];
@@ -4986,77 +5059,92 @@ andUnauthenticatedHandler: (MXRestClientUnauthenticatedHandler)unauthenticatedHa
                                  }];
 }
 
+#pragma mark - Device dehydration
 
-#pragma mark - Crypto: Dehydration
-
-- (MXHTTPOperation*)getDehydratedDeviceWithSuccess:(void (^)(MXDehydratedDevice *device))success
-                                           failure:(void (^)(NSError *error))failure
-{
-    MXWeakify(self);
-    return [httpClient requestWithMethod:@"GET"
-                                    path:[NSString stringWithFormat:@"%@/%@/org.matrix.msc2697.v2/dehydrated_device", credentials.homeServer, kMXAPIPrefixPathUnstable]
-                              parameters:@{}
-                                 success:^(NSDictionary *JSONResponse) {
-                                    __block MXDehydratedDevice *device;
-                                    [self dispatchProcessing:^{
-                                        MXJSONModelSetMXJSONModel(device, MXDehydratedDevice, JSONResponse);
-                                    } andCompletion:^{
-                                        success(device);
-                                    }];
-                                 }
-                                 failure:^(NSError *error) {
-                                    MXStrongifyAndReturnIfNil(self);
-                                    [self dispatchFailure:error inBlock:failure];
-                                 }];
-}
-
-- (MXHTTPOperation*)setDehydratedDevice:(MXDehydratedDevice *)device
-                        withDisplayName:(NSString *)deviceDisplayName
-                                success:(void (^)(NSString *deviceId))success
-                                failure:(void (^)(NSError *error))failure
+- (MXHTTPOperation*)createDehydratedDevice:(MXDehydratedDeviceCreationParameters *)parameters
+                                   success:(void (^)(NSString *deviceId))success
+                                   failure:(void (^)(NSError *error))failure
 {
     MXWeakify(self);
     return [httpClient requestWithMethod:@"PUT"
-                                    path:[NSString stringWithFormat:@"%@/%@/org.matrix.msc2697.v2/dehydrated_device", credentials.homeServer, kMXAPIPrefixPathUnstable]
-                              parameters:@{
-                                    @"initial_device_display_name": deviceDisplayName,
-                                    @"device_data": device.JSONDictionary}
+                                    path:[NSString stringWithFormat:@"%@/%@/org.matrix.msc3814.v1/dehydrated_device", credentials.homeServer, kMXAPIPrefixPathUnstable]
+                              parameters:parameters.JSONDictionary
                                  success:^(NSDictionary *JSONResponse) {
-                                    __block NSString *deviceId;
-                                    [self dispatchProcessing:^{
-                                        deviceId = JSONResponse[@"device_id"];
-                                    } andCompletion:^{
-                                        success(deviceId);
-                                    }];
-                                 }
-                                 failure:^(NSError *error) {
-                                    MXStrongifyAndReturnIfNil(self);
-                                    [self dispatchFailure:error inBlock:failure];
-                                 }];
+        __block NSString *deviceId;
+        [self dispatchProcessing:^{
+            MXJSONModelSetString(deviceId, JSONResponse[@"device_id"])
+        } andCompletion:^{
+            success(deviceId);
+        }];
+    } failure:^(NSError *error) {
+        MXStrongifyAndReturnIfNil(self);
+        [self dispatchFailure:error inBlock:failure];
+    }];
 }
 
-- (MXHTTPOperation*)claimDehydratedDeviceWithId:(NSString*)deviceId
-                                        Success:(void (^)(BOOL success))success
-                                        failure:(void (^)(NSError *error))failure
+- (MXHTTPOperation*)retrieveDehydratedDeviceWithSuccess:(void (^)(MXDehydratedDeviceResponse *dehydratedDevice))success
+                                                failure:(void (^)(NSError *error))failure
 {
     MXWeakify(self);
-    return [httpClient requestWithMethod:@"POST"
-                                    path:[NSString stringWithFormat:@"%@/%@/org.matrix.msc2697.v2/dehydrated_device/claim", credentials.homeServer, kMXAPIPrefixPathUnstable]
-                              parameters:@{@"device_id": deviceId}
+    return [httpClient requestWithMethod:@"GET"
+                                    path:[NSString stringWithFormat:@"%@/%@/org.matrix.msc3814.v1/dehydrated_device", credentials.homeServer, kMXAPIPrefixPathUnstable]
+                              parameters:@{}
                                  success:^(NSDictionary *JSONResponse) {
-                                    __block BOOL successValue;
-                                    [self dispatchProcessing:^{
-                                        successValue = [JSONResponse[@"success"] boolValue];
-                                    } andCompletion:^{
-                                        success(successValue);
-                                    }];
-                                 }
-                                 failure:^(NSError *error) {
-                                    MXStrongifyAndReturnIfNil(self);
-                                    [self dispatchFailure:error inBlock:failure];
-                                 }];
+        __block MXDehydratedDeviceResponse *dehydratedDevice;
+        [self dispatchProcessing:^{
+            MXJSONModelSetMXJSONModel(dehydratedDevice, MXDehydratedDeviceResponse, JSONResponse);
+        } andCompletion:^{
+            success(dehydratedDevice);
+        }];
+    } failure:^(NSError *error) {
+        MXStrongifyAndReturnIfNil(self);
+        [self dispatchFailure:error inBlock:failure];
+    }];
 }
 
+- (MXHTTPOperation*)deleteDehydratedDeviceWithSuccess:(void (^)(void))success
+                                              failure:(void (^)(NSError *error))failure
+{
+    MXWeakify(self);
+    return [httpClient requestWithMethod:@"DELETE"
+                                    path:[NSString stringWithFormat:@"%@/%@/org.matrix.msc3814.v1/dehydrated_device", credentials.homeServer, kMXAPIPrefixPathUnstable]
+                              parameters:nil
+                                 success:^(NSDictionary *JSONResponse) {
+        success();
+    } failure:^(NSError *error) {
+        MXStrongifyAndReturnIfNil(self);
+        [self dispatchFailure:error inBlock:failure];
+    }];
+}
+
+- (MXHTTPOperation*)retrieveDehydratedDeviceEventsForDeviceId:(NSString *)deviceId
+                                                    nextBatch:(NSString *)nextBatch
+                                                      success:(void (^)(MXDehydratedDeviceEventsResponse *dehydratedDeviceEventsResponse))success
+                                                      failure:(void (^)(NSError *error))failure
+{
+    NSMutableDictionary *parameters = [NSMutableDictionary dictionary];
+    if (nextBatch != nil) {
+        parameters[@"next_batch"] = nextBatch;
+    }
+    
+    MXWeakify(self);
+    return [httpClient requestWithMethod:@"POST"
+                                    path:[NSString stringWithFormat:@"%@/%@/org.matrix.msc3814.v1/dehydrated_device/%@/events", credentials.homeServer, kMXAPIPrefixPathUnstable, [MXTools encodeURIComponent:deviceId]]
+                              parameters:parameters
+                                 success:^(NSDictionary *JSONResponse) {
+        __block MXDehydratedDeviceEventsResponse *dehydratedDeviceEventsResponse;
+        [self dispatchProcessing:^{
+            MXJSONModelSetMXJSONModel(dehydratedDeviceEventsResponse, MXDehydratedDeviceEventsResponse, JSONResponse);
+        } andCompletion:^{
+            success(dehydratedDeviceEventsResponse);
+        }];
+        
+        
+    } failure:^(NSError *error) {
+        MXStrongifyAndReturnIfNil(self);
+        [self dispatchFailure:error inBlock:failure];
+    }];
+}
 
 #pragma mark - Crypto: e2e keys backup
 - (MXHTTPOperation*)createKeyBackupVersion:(MXKeyBackupVersion*)keyBackupVersion
